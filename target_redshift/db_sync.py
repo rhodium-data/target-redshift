@@ -1,4 +1,4 @@
-import collections
+import collections.abc
 import itertools
 import json
 import os
@@ -161,7 +161,7 @@ def flatten_record(d, flatten_schema=None, parent_key=[], sep='__', level=0, max
     items = []
     for k, v in d.items():
         new_key = flatten_key(k, parent_key, sep)
-        if isinstance(v, collections.MutableMapping) and level < max_level:
+        if isinstance(v, collections.abc.MutableMapping) and level < max_level:
             items.extend(flatten_record(v, flatten_schema, parent_key + [k], sep=sep, level=level + 1, max_level=max_level).items())
         else:
             items.append((new_key, json.dumps(v) if _should_json_dump_value(k, v, flatten_schema) else v))
@@ -254,6 +254,7 @@ class DbSync:
 
         self.s3 = aws_session.client('s3')
         self.skip_updates = self.connection_config.get('skip_updates', False)
+        self.primary_key_required = self.connection_config.get('primary_key_required', True)
 
         self.schema_name = None
         self.grantees = None
@@ -470,7 +471,7 @@ class DbSync:
                 # Step 5/a: Insert or Update if primary key defined
                 #           Do UPDATE first and second INSERT to calculate
                 #           the number of affected rows correctly
-                if len(stream_schema_message['key_properties']) > 0:
+                if len(stream_schema_message['key_properties']) > 0 and self.primary_key_required:
                     # Step 5/a/1: Update existing records
                     if not self.skip_updates:
                         update_sql = """UPDATE {}
