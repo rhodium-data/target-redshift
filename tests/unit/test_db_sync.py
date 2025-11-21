@@ -123,6 +123,103 @@ class TestTargetRedshift(object):
         assert trans_mapper(json_int) == ''
 
 
+    def test_safe_column_name(self):
+        """Test safe column name formatting"""
+        safe_name = target_redshift.db_sync.safe_column_name
+
+        # Test basic column name
+        assert safe_name('my_column') == '"MY_COLUMN"'
+
+        # Test with special characters
+        assert safe_name('column-with-dash') == '"COLUMN-WITH-DASH"'
+
+        # Test with spaces
+        assert safe_name('column with spaces') == '"COLUMN WITH SPACES"'
+
+        # Test lowercase conversion
+        assert safe_name('MixedCase') == '"MIXEDCASE"'
+
+
+    def test_column_clause(self):
+        """Test column clause generation"""
+        clause = target_redshift.db_sync.column_clause
+
+        # Test string column
+        assert clause('name', {"type": ["string"]}) == '"NAME" character varying(10000)'
+
+        # Test integer column
+        assert clause('id', {"type": ["integer"]}) == '"ID" numeric'
+
+        # Test SUPER column
+        assert clause('metadata', {"type": "super"}) == '"METADATA" super'
+
+        # Test timestamp column
+        assert clause('created_at', {"type": ["string"], "format": "date-time"}) == '"CREATED_AT" timestamp without time zone'
+
+
+    def test_primary_column_names(self):
+        """Test primary column names extraction"""
+        get_primary = target_redshift.db_sync.primary_column_names
+
+        # Test single primary key
+        schema_msg = {"key_properties": ["id"]}
+        assert get_primary(schema_msg) == ['"ID"']
+
+        # Test composite primary key
+        schema_msg = {"key_properties": ["user_id", "product_id"]}
+        assert get_primary(schema_msg) == ['"USER_ID"', '"PRODUCT_ID"']
+
+        # Test no primary key
+        schema_msg = {"key_properties": []}
+        assert get_primary(schema_msg) == []
+
+
+    def test_flatten_key(self):
+        """Test flatten key generation"""
+        flatten_key = target_redshift.db_sync.flatten_key
+
+        # Test simple key
+        assert flatten_key('column', [], '__') == 'column'
+
+        # Test nested key
+        assert flatten_key('address', ['user'], '__') == 'user__address'
+
+        # Test multiple levels
+        assert flatten_key('zip', ['user', 'address'], '__') == 'user__address__zip'
+
+        # Test with long names that need truncation (>= 127 chars)
+        long_parent = ['very_long_column_name_that_exceeds_the_maximum_length_allowed_by_redshift_for_column_identifiers']
+        result = flatten_key('another_very_long_column_name_for_testing', long_parent, '__')
+        # Should be shortened to stay under 127 chars
+        assert len(result) < 127
+
+
+    def test_should_json_dump_value(self):
+        """Test _should_json_dump_value helper function"""
+        should_dump = target_redshift.db_sync._should_json_dump_value
+
+        # Test dict values should be dumped
+        assert should_dump('key', {'nested': 'value'}, None) is True
+
+        # Test list values should be dumped
+        assert should_dump('key', ['item1', 'item2'], None) is True
+
+        # Test string values should not be dumped
+        assert should_dump('key', 'simple_string', None) is False
+
+        # Test integer values should not be dumped
+        assert should_dump('key', 123, None) is False
+
+        # Test with flatten_schema that marks field as object/array type
+        flatten_schema = {
+            'json_field': {'type': ['null', 'object', 'array']}
+        }
+        assert should_dump('json_field', 'some_value', flatten_schema) is True
+
+        # Test with flatten_schema but key not matching
+        assert should_dump('other_field', 'some_value', flatten_schema) is False
+
+
     def test_stream_name_to_dict(self):
         """Test identifying catalog, schema and table names from fully qualified stream and table names"""
         # Singer stream name format (Default '-' separator)
@@ -243,6 +340,76 @@ class TestTargetRedshift(object):
                 'c_obj__nested_prop3__multi_nested_prop1': {'type': ['null', 'string']},
                 'c_obj__nested_prop3__multi_nested_prop2': {'type': ['null', 'string']}
             }
+
+
+    def test_flatten_schema_edge_cases(self):
+        """Test flatten_schema edge cases and error conditions"""
+        flatten_schema = target_redshift.db_sync.flatten_schema
+
+        # Test schema with anyOf/oneOf pattern (no direct 'type' key)
+        schema_with_anyof = {
+            "type": "object",
+            "properties": {
+                "field1": {
+                    "anyOf": [
+                        {"type": "string"}
+                    ]
+                }
+            }
+        }
+        result = flatten_schema(schema_with_anyof)
+        assert 'field1' in result
+        assert result['field1']['type'] == ['null', 'string']
+
+        # Test schema with anyOf pattern for array
+        schema_with_array_anyof = {
+            "type": "object",
+            "properties": {
+                "field2": {
+                    "anyOf": [
+                        {"type": "array"}
+                    ]
+                }
+            }
+        }
+        result = flatten_schema(schema_with_array_anyof)
+        assert 'field2' in result
+        assert result['field2']['type'] == ['null', 'array']
+
+        # Test schema with anyOf pattern for object
+        schema_with_object_anyof = {
+            "type": "object",
+            "properties": {
+                "field3": {
+                    "anyOf": [
+                        {"type": "object"}
+                    ]
+                }
+            }
+        }
+        result = flatten_schema(schema_with_object_anyof)
+        assert 'field3' in result
+        assert result['field3']['type'] == ['null', 'object']
+
+        # Test duplicate column names raises ValueError
+        # This would happen if flattening creates the same column name twice
+        schema_with_duplicate_potential = {
+            "type": "object",
+            "properties": {
+                "a__b": {"type": ["string"]},
+                "a": {
+                    "type": ["object"],
+                    "properties": {
+                        "b": {"type": ["string"]}
+                    }
+                }
+            }
+        }
+        try:
+            flatten_schema(schema_with_duplicate_potential, max_level=1)
+            assert False, "Should have raised ValueError for duplicate column names"
+        except ValueError as e:
+            assert 'Duplicate column name' in str(e)
 
 
     def test_flatten_record(self):
