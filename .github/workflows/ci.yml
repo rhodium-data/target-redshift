@@ -2,46 +2,86 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, main]
   pull_request:
-    branches: [master]
+    branches: [master, main]
 
   workflow_dispatch:
 
 jobs:
-  build:
-
+  test:
+    name: Test Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
+
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        python-version: [3.6, 3.7, 3.8]
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - name: Checking out repo
-        uses: actions/checkout@v2
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.container[1] }}
-        uses: actions/setup-python@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: set LOGGING_CONF_FILE env
-        run: |
-          export LOGGING_CONF_FILE=$(pwd)/sample_logging.conf
-          echo $LOGGING_CONF_FILE
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip setuptools wheel
+          python -m pip install --upgrade pip setuptools wheel
+          pip install .[test]
+          pip install pylint
+
+      - name: Run linting
+        run: |
+          pylint target_redshift -d C,W,unexpected-keyword-arg,duplicate-code
+
+      - name: Run unit tests with coverage
+        run: |
+          coverage run -m pytest -vv --disable-pytest-warnings tests/unit
+          coverage report
+          coverage xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: matrix.python-version == '3.10'
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  mock-integration-test:
+    name: Mock Integration Tests (Python 3.10)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
           pip install .[test]
 
-      - name: Check if pylint is happy
-        run: pylint target_redshift -d C,W,unexpected-keyword-arg,duplicate-code
+      - name: Start PostgreSQL container
+        run: |
+          docker-compose up -d
+          sleep 10
 
-      - name: Run Unit Tests
-        run: pytest -v --disable-pytest-warnings tests/unit
-#
-#     No redshift instance to run these against
-#      - name: Run Integration Tests
-#        run: pytest -v --disable-pytest-warnings -v tests/integration
+      - name: Run mock integration tests
+        run: |
+          pytest -vv --disable-pytest-warnings tests/mock_integration
+
+      - name: Stop PostgreSQL container
+        if: always()
+        run: |
+          docker-compose down -v

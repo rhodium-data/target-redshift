@@ -1,6 +1,8 @@
 # target-redshift
 
+[![CI](https://github.com/rhodium-data/target-redshift/actions/workflows/ci.yml/badge.svg)](https://github.com/rhodium-data/target-redshift/actions/workflows/ci.yml)
 [![License: Apache2](https://img.shields.io/badge/License-Apache2-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 [Singer](https://www.singer.io/) target that loads data into Amazon Redshift following the [Singer spec](https://github.com/singer-io/getting-started/blob/master/docs/SPEC.md).
 
@@ -413,6 +415,34 @@ coverage run -m pytest -vv --disable-pytest-warnings tests/integration && covera
 ```
 
 **Tip:** Consider using a `.env` file with `direnv` or `python-dotenv` to manage environment variables securely. Never commit credentials to version control.
+
+### CI/CD
+
+This project uses GitHub Actions for continuous integration and deployment:
+
+**Continuous Integration:**
+- Runs on every push and pull request to `master`/`main` branches
+- Tests against Python 3.10, 3.11, and 3.12
+- Executes linting (pylint) to maintain code quality
+- Runs all unit tests with coverage reporting
+- Runs mock integration tests with PostgreSQL in Docker
+- Uploads coverage to Codecov (optional)
+
+**Workflows:**
+- `.github/workflows/ci.yml` - Main CI pipeline with unit and mock integration tests
+- `.github/workflows/pythonpublish.yml` - PyPI publishing on release
+
+**Testing in CI:**
+```bash
+# Unit tests run on all Python versions (3.10, 3.11, 3.12)
+coverage run -m pytest -vv tests/unit
+
+# Mock integration tests run on Python 3.10 with Docker
+docker-compose up -d
+pytest -vv tests/mock_integration
+```
+
+The CI pipeline ensures all contributions are tested and validated before merging.
 
 ### Quick Setup with Makefile
 
