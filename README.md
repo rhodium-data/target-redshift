@@ -15,6 +15,15 @@ We thank all in the open-source community, that over the past 6 years, have help
 
 This is a [PipelineWise](https://transferwise.github.io/pipelinewise) compatible target connector.
 
+## Recent Updates
+
+### Version 1.6.0
+
+- **Redshift SUPER Data Type Support**: Added full support for Redshift SUPER data type. The target now automatically detects SUPER type in both the `type` and `format` fields and handles JSON data natively without requiring parse_json transformations.
+- **Python 3.10 Compatibility**: Upgraded all dependencies to ensure full compatibility with Python 3.10.
+- **Version Flag**: Added `--version` flag to display the current version of target-redshift.
+- **Enhanced Testing**: Improved and expanded unit test coverage for better reliability.
+
 ## How to use it
 
 The recommended method of running this target is to use it from [PipelineWise](https://transferwise.github.io/pipelinewise). When running it from PipelineWise you don't need to configure this tap with JSON files and most of things are automated. Please check the related documentation at [Target Redshift](https://transferwise.github.io/pipelinewise/connectors/targets/redshift.html)
@@ -44,6 +53,19 @@ or
   pip install --upgrade pip
   pip install .
 ```
+
+### Platform-Specific Installation Notes
+
+When installing from source with extras (e.g., `pip install .[test]`), different shells require different syntax:
+
+| Shell | Command | Notes |
+|-------|---------|-------|
+| Bash/sh | `pip install .[test]` | No escaping needed |
+| Zsh (macOS Catalina+) | `pip install .\[test\]` | Brackets must be escaped |
+| Fish | `pip install .[test]` | No escaping needed |
+| Windows CMD/PowerShell | `pip install ".[test]"` | Use quotes |
+
+**Tip:** Using the provided Makefile (`make install-dev`) works on all platforms and handles these differences automatically.
 
 ### To run
 
@@ -110,26 +132,326 @@ Full list of options in `config.json`:
 | slices                              | Integer |    No      | The number of slices to split files into prior to running COPY on Redshift. This should be set to the number of Redshift slices. The number of slices per node depends on the node size of the cluster - run `SELECT COUNT(DISTINCT slice) slices FROM stv_slices` to calculate this. Defaults to `1`. |
 | temp_dir                            | String  |            | (Default: platform-dependent) Directory of temporary CSV files with RECORD messages. |
 
-### To run tests:
+## Development
+
+### Testing
+
+This project includes comprehensive unit and integration tests to ensure reliability and correctness of the Redshift target connector.
+
+#### Unit Tests
+
+Unit tests verify the core functionality without requiring external dependencies like Redshift or AWS. They use mocking to isolate and test individual components.
+
+**What Unit Tests Cover:**
+
+- **Configuration Validation** (in `tests/unit/test_db_sync.py`)
+  - Validates required configuration fields
+  - Tests minimal valid configuration
+  - Validates schema mapping configurations
+
+- **Data Type Mapping** (in `tests/unit/test_db_sync.py`)
+  - JSON schema types to Redshift column types (string, integer, number, boolean, etc.)
+  - Special type handling: SUPER type, date-time, time formats
+  - VARCHAR length calculations and constraints
+  - Tests with `with_length` parameter variations
+
+- **Column Transformations** (in `tests/unit/test_db_sync.py`)
+  - Tests `parse_json` transformation for object and array types
+  - Verifies SUPER types don't get unnecessary transformations
+  - Validates transformation function mappings
+
+- **Column Name Safety** (in `tests/unit/test_db_sync.py`)
+  - Safe column name formatting (uppercase, quoting)
+  - Special character handling (dashes, spaces)
+  - Column clause generation for CREATE TABLE statements
+  - Primary key column name extraction
+
+- **Schema Flattening** (in `tests/unit/test_db_sync.py`)
+  - Nested JSON object flattening at various levels
+  - Flattening with `max_level` parameter (0, 1, 10, etc.)
+  - Edge cases: anyOf/oneOf patterns, duplicate column detection
+  - Complex nested object hierarchies
+
+- **Record Flattening** (in `tests/unit/test_db_sync.py`)
+  - Record data transformation matching flattened schemas
+  - JSON stringification for nested objects
+  - Flatten key generation with separator handling
+  - Column name truncation for long identifiers
+
+- **Stream Name Parsing** (in `tests/unit/test_db_sync.py`)
+  - Singer stream name format parsing (catalog-schema-table)
+  - Redshift table format parsing with custom separators
+  - Extraction of catalog, schema, and table names
+
+- **Batch Processing** (in `tests/unit/test_target_rs.py`)
+  - Tests batch size limits and flushing behavior
+  - Validates stream flushing at correct intervals
+
+**Running Unit Tests:**
+
+Unit tests require no external configuration and run entirely locally using mocks.
+
+```bash
+# Using Makefile (recommended)
+make test-unit
+
+# Or manually
+coverage run -m pytest -vv --disable-pytest-warnings tests/unit && coverage report
+```
+
+#### Integration Tests
+
+Integration tests validate end-to-end functionality by connecting to a real Redshift cluster and S3 bucket. These tests verify actual data loading, transformations, and edge cases in a live environment.
+
+**What Integration Tests Cover:**
+
+1. **Basic Data Loading** (in `tests/integration/test_target_redshift.py`)
+   - Loading multiple tables with various column types
+   - Validates data integrity after loading
+   - Tests with and without metadata columns
+
+2. **Compression Methods** (in `tests/integration/test_target_redshift.py`)
+   - GZIP compression for S3 uploads
+   - BZIP2 compression for S3 uploads
+   - Validates data integrity with different compression methods
+
+3. **Performance Configurations** (in `tests/integration/test_target_redshift.py`)
+   - Custom parallelism settings (multi-threaded loading)
+   - Slicing files for optimal COPY performance
+   - Tests different batch size configurations
+
+4. **Metadata and Delete Operations** (in `tests/integration/test_target_redshift.py`)
+   - Adding Singer metadata columns (_sdc_extracted_at, _sdc_batched_at, _sdc_deleted_at)
+   - Hard delete mode (physical deletion of soft-deleted rows)
+   - Validates deleted rows are properly removed
+
+5. **Schema Operations** (in `tests/integration/test_target_redshift.py`)
+   - Multiple SCHEMA messages for the same stream
+   - Column name changes and schema evolution
+   - Column additions with proper NULL handling
+   - Reserved words as table names
+   - Tables with spaces in names
+
+6. **Character Encoding** (in `tests/integration/test_target_redshift.py`)
+   - Unicode characters (Chinese, Russian, Thai, Arabic, Greek)
+   - Special characters and escape sequences
+   - Long text handling (128, 256, 1K, 4K, 32K+ characters)
+   - VARCHAR length validation
+
+7. **Data Flattening** (in `tests/integration/test_target_redshift.py`)
+   - Nested JSON objects without flattening (stored as JSON strings)
+   - Nested JSON objects with flattening (expanded to columns)
+   - Different flattening levels (max_level parameter)
+
+8. **Column Name Normalization** (in `tests/integration/test_target_redshift.py`)
+   - camelCase column names
+   - Columns with special characters (dashes, underscores)
+   - Non-database-friendly naming conventions
+
+9. **Access Control** (in `tests/integration/test_target_redshift.py`)
+   - GRANT SELECT privileges to users
+   - GRANT SELECT privileges to groups
+   - Schema-level USAGE grants
+   - Validates permission errors for non-existent users/groups
+
+10. **AWS Authentication Methods** (in `tests/integration/test_target_redshift.py`)
+    - Explicit AWS access keys
+    - Environment variable credentials
+    - IAM role ARN for COPY operations
+
+11. **Advanced Features** (in `tests/integration/test_target_redshift.py`)
+    - Custom COPY options
+    - Invalid COPY option error handling
+    - Custom temporary directory for CSV staging
+
+12. **Logical Replication (CDC)** (in `tests/integration/test_target_redshift.py`)
+    - PostgreSQL logical replication streams
+    - Handles INSERT, UPDATE, DELETE operations
+    - LSN (Log Sequence Number) tracking
+    - Bookmark state management with incremental flushes
+    - Tests with various batch sizes (default, 5, 10, 1000)
+
+13. **State Management** (in `tests/integration/test_target_redshift.py`)
+    - State emission without intermediate flushes
+    - State emission with intermediate flushes
+    - Per-stream bookmark updates
+    - flush_all_streams mode behavior
+
+14. **Record Validation** (in `tests/integration/test_target_redshift.py`)
+    - Schema validation when enabled
+    - Catches invalid records before loading
+    - Tests validation error handling
+
+15. **Error Handling** (in `tests/integration/test_target_redshift.py`)
+    - Invalid JSON message handling
+    - Invalid message order (RECORD before SCHEMA)
+    - Validates appropriate exceptions are raised
+
+16. **Update Strategies** (in `tests/integration/test_target_redshift.py`)
+    - skip_updates mode for immutable records
+    - Tests that existing records aren't updated when flag is set
+    - Validates inserts still work with skip_updates enabled
+
+**Integration Test Configuration:**
+
+Integration tests require a live Redshift cluster and S3 bucket. Configuration is provided via environment variables:
+
+| Environment Variable | Description | Required |
+|---------------------|-------------|----------|
+| `TARGET_REDSHIFT_HOST` | Redshift cluster endpoint | Yes |
+| `TARGET_REDSHIFT_PORT` | Redshift port (usually 5439) | Yes |
+| `TARGET_REDSHIFT_USER` | Database user with CREATE/DROP schema permissions | Yes |
+| `TARGET_REDSHIFT_PASSWORD` | Database password | Yes |
+| `TARGET_REDSHIFT_DBNAME` | Database name | Yes |
+| `TARGET_REDSHIFT_SCHEMA` | Target schema for test tables (will be dropped/recreated) | Yes |
+| `TARGET_REDSHIFT_AWS_ACCESS_KEY` | AWS access key for S3 operations | Yes |
+| `TARGET_REDSHIFT_AWS_SECRET_ACCESS_KEY` | AWS secret access key | Yes |
+| `TARGET_REDSHIFT_S3_ACL` | S3 object ACL (e.g., "private", "bucket-owner-full-control") | Yes |
+| `TARGET_REDSHIFT_S3_BUCKET` | S3 bucket name for staging files | Yes |
+| `TARGET_REDSHIFT_S3_KEY_PREFIX` | S3 key prefix/directory for staging files | Yes |
+| `TARGET_REDSHIFT_AWS_REDSHIFT_COPY_ROLE_ARN` | (Optional) IAM role ARN for COPY operation | No |
+
+**Important Notes:**
+
+- **Schema Cleanup**: Tests automatically DROP and recreate the target schema. Never use a production schema!
+- **S3 Bucket**: The specified S3 bucket will have files written and deleted during tests. Use a dedicated test bucket.
+- **Permissions Required**:
+  - Redshift: CREATE SCHEMA, DROP SCHEMA, CREATE TABLE, CREATE USER, CREATE GROUP, GRANT
+  - S3: PutObject, DeleteObject, GetObject
+  - IAM: If using role ARN, the role must have S3 read access
+
+**Running Integration Tests:**
+
+```bash
+# Set required environment variables
+export TARGET_REDSHIFT_HOST=my-cluster.abc123.us-east-1.redshift.amazonaws.com
+export TARGET_REDSHIFT_PORT=5439
+export TARGET_REDSHIFT_USER=test_user
+export TARGET_REDSHIFT_PASSWORD=MySecurePassword123
+export TARGET_REDSHIFT_DBNAME=dev
+export TARGET_REDSHIFT_SCHEMA=test_target_redshift
+export TARGET_REDSHIFT_AWS_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE
+export TARGET_REDSHIFT_AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+export TARGET_REDSHIFT_S3_ACL=private
+export TARGET_REDSHIFT_S3_BUCKET=my-test-bucket
+export TARGET_REDSHIFT_S3_KEY_PREFIX=test-target-redshift/
+
+# Run integration tests using Makefile
+make test-integration
+
+# Or manually
+coverage run -m pytest -vv --disable-pytest-warnings tests/integration && coverage report
+```
+
+**Tip:** Consider using a `.env` file with `direnv` or `python-dotenv` to manage environment variables securely. Never commit credentials to version control.
+
+### Quick Setup with Makefile
+
+A Makefile is provided to simplify common development tasks:
+
+```bash
+# Show all available commands
+make help
+
+# Create and activate virtual environment
+make venv
+source .venv/bin/activate
+
+# Install package with development dependencies
+make install-dev
+
+# Run unit tests with coverage
+make test-unit
+
+# Run linting
+make lint
+
+# Clean build artifacts and virtual environment
+make clean
+```
+
+**Platform-specific notes:**
+- **Using Makefile (recommended):** The Makefile handles special characters automatically across all shells (bash, zsh, fish, etc.), so `make install-dev` works everywhere.
+- **Zsh (macOS Catalina+ default):** If running pip commands manually, escape brackets: `pip install .\[test\]`
+- **Bash/sh/other shells:** No escaping needed: `pip install .[test]`
+- **Fish shell:** No escaping needed: `pip install .[test]`
+- **Windows Command Prompt/PowerShell:** Use quotes: `pip install ".[test]"`
+
+### Manual Testing Setup
+
+For detailed information about what the tests cover and how to configure them, see the [Testing](#testing) section above.
 
 1. Install python dependencies in a virtual env:
 
+<details>
+<summary><b>Shell-specific commands (click to expand)</b></summary>
 
+**Bash/sh:**
 ```bash
-  python3 -m venv venv
-  . venv/bin/activate
-  pip install --upgrade pip
-  pip install .[test]
+python3 -m venv .venv
+. .venv/bin/activate
+pip install --upgrade pip
+pip install .[test]
 ```
 
-1. To run unit tests:
+**Zsh (macOS Catalina+ default):**
+```zsh
+python3 -m venv .venv
+. .venv/bin/activate
+pip install --upgrade pip
+pip install .\[test\]
+```
 
+**Fish:**
+```fish
+python3 -m venv .venv
+. .venv/bin/activate.fish
+pip install --upgrade pip
+pip install .[test]
+```
+
+**Windows Command Prompt:**
+```cmd
+python -m venv .venv
+.venv\Scripts\activate.bat
+pip install --upgrade pip
+pip install ".[test]"
+```
+
+**Windows PowerShell:**
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install ".[test]"
+```
+
+</details>
+
+Or simply use the Makefile (works on all platforms with make installed):
+```bash
+make venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+make install-dev
+```
+
+2. To run unit tests:
 
 ```bash
   coverage run -m pytest -vv --disable-pytest-warnings tests/unit && coverage report
 ```
 
-1. To run integration tests define environment variables first:
+Or using the Makefile:
+
+```bash
+  make test-unit
+```
+
+3. To run integration tests:
+
+Integration tests require a live Redshift cluster and S3 bucket. See the [Integration Test Configuration](#integration-tests) section for detailed setup instructions including all required environment variables and permissions.
+
+Quick example:
 
 ```bash
   export TARGET_REDSHIFT_HOST=<redshift-host>
@@ -147,18 +469,66 @@ Full list of options in `config.json`:
   coverage run -m pytest -vv --disable-pytest-warnings tests/integration && coverage report
 ```
 
-### To run pylint:
-
-1. Install python dependencies and run python linter
-
+Or using the Makefile:
 
 ```bash
-  python3 -m venv venv
-  . venv/bin/activate
-  pip install --upgrade pip
-  pip install .[test]
-  pip install pylint
-  pylint target_redshift -d C,W,unexpected-keyword-arg,duplicate-code
+  make test-integration
+```
+
+**Warning:** Integration tests will DROP and recreate the target schema. Never use a production schema!
+
+### Running Linter
+
+<details>
+<summary><b>Manual installation (shell-specific)</b></summary>
+
+**Bash/sh:**
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+pip install --upgrade pip
+pip install .[test]
+pip install pylint
+pylint target_redshift -d C,W,unexpected-keyword-arg,duplicate-code
+```
+
+**Zsh (macOS Catalina+ default):**
+```zsh
+python3 -m venv .venv
+. .venv/bin/activate
+pip install --upgrade pip
+pip install .\[test\]
+pip install pylint
+pylint target_redshift -d C,W,unexpected-keyword-arg,duplicate-code
+```
+
+**Fish:**
+```fish
+python3 -m venv .venv
+. .venv/bin/activate.fish
+pip install --upgrade pip
+pip install .[test]
+pip install pylint
+pylint target_redshift -d C,W,unexpected-keyword-arg,duplicate-code
+```
+
+**Windows (Command Prompt/PowerShell):**
+```powershell
+python -m venv .venv
+.venv\Scripts\activate
+pip install --upgrade pip
+pip install ".[test]"
+pip install pylint
+pylint target_redshift -d C,W,unexpected-keyword-arg,duplicate-code
+```
+
+</details>
+
+Or simply use the Makefile (recommended, works on all platforms):
+
+```bash
+make install-dev
+make lint
 ```
 
 ## License
