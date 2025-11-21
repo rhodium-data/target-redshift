@@ -23,7 +23,7 @@ setup(name="target-redshift",
       ],
       py_modules=["target_redshift"],
       install_requires=[
-          'pipelinewise-singer-python>=1.3.0,<2.0.0',  # v2.x requires orjson 3.6.1 which lacks ARM64 wheels
+          'pipelinewise-singer-python>=1.3.0,<3.0.0',  # v2.x requires orjson 3.6.1 which lacks ARM64 wheels
           'boto3>=1.20.0',
           'psycopg2-binary>=2.9.0',
           'inflection>=0.5.0',
