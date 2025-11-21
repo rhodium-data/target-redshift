@@ -21,7 +21,7 @@ METADATA_COLUMNS = ["_sdc_extracted_at", "_sdc_batched_at", "_sdc_deleted_at"]
 
 class TestTargetRedshift(object):
     """
-    Integration Tests for PipelineWise Target Redshift
+    Integration Tests for Target Redshift
     """
 
     def setup_method(self):
@@ -1071,7 +1071,7 @@ class TestTargetRedshift(object):
         tap_lines = test_utils.get_test_tap_lines('messages-with-three-streams.json')
 
         # Setting custom temp_dir
-        self.config['temp_dir'] = ('~/.pipelinewise/tmp')
+        self.config['temp_dir'] = ('~/.target-redshift/tmp')
         target_redshift.persist_lines(self.config, tap_lines)
 
         self.assert_three_streams_are_loaded_in_redshift()

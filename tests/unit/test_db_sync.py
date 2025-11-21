@@ -5,7 +5,7 @@ import target_redshift
 
 class TestTargetRedshift(object):
     """
-    Unit Tests for PipelineWise Target Redshift
+    Unit Tests for Target Redshift
     """
     def setup_method(self):
         self.config = {}

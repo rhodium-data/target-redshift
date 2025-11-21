@@ -10,13 +10,13 @@ with open('README.md') as f:
 with open('target_redshift/__init__.py') as f:
     version = re.search(r"^__version__ = ['\"]([^'\"]*)['\"]", f.read(), re.M).group(1)
 
-setup(name="pipelinewise-target-redshift",
+setup(name="target-redshift",
       version=version,
-      description="Singer.io target for loading data to Amazon Redshift - PipelineWise compatible",
+      description="Singer.io target for loading data to Amazon Redshift",
       long_description=long_description,
       long_description_content_type='text/markdown',
-      author="TransferWise",
-      url='https://github.com/transferwise/pipelinewise-target-redshift',
+      author="Community Contributors",
+      url='https://github.com/rhodium-data/target-redshift',
       classifiers=[
           'License :: OSI Approved :: Apache Software License',
           'Programming Language :: Python :: 3 :: Only'

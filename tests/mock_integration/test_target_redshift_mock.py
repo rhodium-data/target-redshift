@@ -18,7 +18,7 @@ except ImportError:
 
 class TestTargetRedshiftMock:
     """
-    Mock Integration Tests for PipelineWise Target Redshift using PostgreSQL
+    Mock Integration Tests for Target Redshift using PostgreSQL
     """
 
     @classmethod

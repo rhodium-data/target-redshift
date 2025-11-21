@@ -1,4 +1,4 @@
-# Makefile for pipelinewise-target-redshift
+# Makefile for target-redshift
 # This Makefile handles special characters automatically across different shells (bash, zsh, etc.)
 # Note: Zsh users can also run these commands directly without using make
 

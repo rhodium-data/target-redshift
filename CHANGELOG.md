@@ -1,14 +1,30 @@
-1.6.1 (2025-11-21)
+1.0.0 (2025-11-21)
 -------------------
 
-- Add support for Redshift SUPER data type with automatic detection and native JSON handling
-- Add `--version` flag to display current version
-- Upgrade all dependencies for full Python 3.10 compatibility
-- Add comprehensive Makefile for simplified development workflows (test, lint, install)
-- Add extensive test coverage documentation with detailed descriptions
-- Add platform-specific installation instructions (Zsh, Bash, Fish, Windows)
-- Improve unit and integration test coverage
-- Add detailed integration test configuration guide with environment variables and permissions
+**Fork Release - Community Maintained**
+
+This is the first release of `target-redshift`, a community-maintained fork of `pipelinewise-target-redshift`.
+
+After TransferWise (Wise) announced the sunsetting of the PipelineWise project in 2024, this fork was created to continue active development and maintenance of the Redshift target connector.
+
+**What's New in This Fork:**
+- Package renamed from `pipelinewise-target-redshift` to `target-redshift`
+- Add mock integration testing infrastructure using Docker PostgreSQL (no AWS required)
+- Fix CSV escaping issues for special characters in mock integration tests
+- Add comprehensive `make test` command that runs both unit and mock integration tests
+- Update all Makefile targets to properly use virtual environment
+- Improve test documentation with accurate implementation details
+- Support for Redshift SUPER data type with automatic detection and native JSON handling
+- `--version` flag to display current version
+- Full Python 3.10 compatibility with upgraded dependencies
+- Comprehensive Makefile for simplified development workflows (test, lint, install)
+- Extensive test coverage with detailed documentation
+- Platform-specific installation instructions (Zsh, Bash, Fish, Windows)
+- Detailed integration test configuration guide
+
+---
+
+## Previous Versions (pipelinewise-target-redshift)
 
 1.6.0 (2020-08-03)
 -------------------

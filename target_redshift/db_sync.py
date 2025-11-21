@@ -410,7 +410,7 @@ class DbSync:
         bucket = self.connection_config['s3_bucket']
         s3_acl = self.connection_config.get('s3_acl')
         s3_key_prefix = self.connection_config.get('s3_key_prefix', '')
-        s3_key = "{}pipelinewise_{}{}".format(s3_key_prefix, stream, suffix)
+        s3_key = "{}target_redshift_{}{}".format(s3_key_prefix, stream, suffix)
 
         self.logger.info("Target S3 bucket: {}, local file: {}, S3 key: {}".format(bucket, file, s3_key))
 

@@ -1,26 +1,25 @@
-# Notice
-To better serve Wise business and customer needs, the PipelineWise codebase needs to shrink.
-We have made the difficult decision that, going forward many components of PipelineWise will be removed or incorporated in the main repo.
-The last version before this decision is [v0.64.1](https://github.com/transferwise/pipelinewise/tree/v0.64.1)
+# target-redshift
 
-We thank all in the open-source community, that over the past 6 years, have helped to make PipelineWise a robust product for heterogeneous replication of many many Terabytes, daily
-
-# pipelinewise-target-redshift
-
-[![PyPI version](https://badge.fury.io/py/pipelinewise-target-redshift.svg)](https://badge.fury.io/py/pipelinewise-target-redshift)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pipelinewise-target-redshift.svg)](https://pypi.org/project/pipelinewise-target-redshift/)
 [![License: Apache2](https://img.shields.io/badge/License-Apache2-yellow.svg)](https://opensource.org/licenses/Apache-2.0)
 
 [Singer](https://www.singer.io/) target that loads data into Amazon Redshift following the [Singer spec](https://github.com/singer-io/getting-started/blob/master/docs/SPEC.md).
 
-This is a [PipelineWise](https://transferwise.github.io/pipelinewise) compatible target connector.
+## Project History
+
+This project is a community-maintained fork of [pipelinewise-target-redshift](https://github.com/transferwise/pipelinewise-target-redshift), originally created by TransferWise (now Wise).
+
+In 2024, Wise announced the sunsetting of the PipelineWise project ([v0.64.1](https://github.com/transferwise/pipelinewise/tree/v0.64.1) was the last version). This fork continues development independently with:
+
+- **Active maintenance** - Bug fixes, dependency updates, and security patches
+- **New features** - Mock integration testing with Docker, improved test coverage
+- **Community-driven** - Open to contributions and feature requests
+
+We are deeply grateful to the TransferWise team and all original contributors for creating this excellent Redshift target connector. Their robust implementation has served the community well for many years.
 
 
 ## How to use it
 
-The recommended method of running this target is to use it from [PipelineWise](https://transferwise.github.io/pipelinewise). When running it from PipelineWise you don't need to configure this tap with JSON files and most of things are automated. Please check the related documentation at [Target Redshift](https://transferwise.github.io/pipelinewise/connectors/targets/redshift.html)
-
-If you want to run this [Singer Target](https://singer.io) independently please read further.
+This [Singer Target](https://singer.io) can be run independently or as part of a Singer-based data pipeline. It follows the Singer specification for loading data into Amazon Redshift.
 
 ## Install
 
@@ -34,7 +33,7 @@ It's recommended to use a virtualenv:
   python3 -m venv venv
   . venv/bin/activate
   pip install --upgrade pip
-  pip install pipelinewise-target-redshift
+  pip install target-redshift
 ```
 
 or
