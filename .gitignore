@@ -15,6 +15,7 @@ dist/
 .coverage.*
 coverage.log
 coverage_html
+build/
 
 # Singer JSON files
 properties.json
@@ -47,3 +48,7 @@ docs/_templates/
 .gpteng/
 .tabnine/
 *.aider.chat.history.md
+
+# Mock integration test data
+tests/mock_integration/data/*
+!tests/mock_integration/data/.gitkeep
