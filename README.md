@@ -425,24 +425,22 @@ This project uses GitHub Actions for continuous integration and deployment:
 - Tests against Python 3.10, 3.11, and 3.12
 - Executes linting (pylint) to maintain code quality
 - Runs all unit tests with coverage reporting
-- Runs mock integration tests with PostgreSQL in Docker
 - Uploads coverage to Codecov (optional)
 
 **Workflows:**
-- `.github/workflows/ci.yml` - Main CI pipeline with unit and mock integration tests
+- `.github/workflows/ci.yml` - Main CI pipeline with unit tests
 - `.github/workflows/pythonpublish.yml` - PyPI publishing on release
 
 **Testing in CI:**
 ```bash
 # Unit tests run on all Python versions (3.10, 3.11, 3.12)
 coverage run -m pytest -vv tests/unit
-
-# Mock integration tests run on Python 3.10 with Docker
-docker-compose up -d
-pytest -vv tests/mock_integration
+coverage report
 ```
 
 The CI pipeline ensures all contributions are tested and validated before merging.
+
+**Note:** Mock integration tests with Docker are available locally via `make test-mock-integration` but are not run in CI to keep builds fast and simple.
 
 ### Quick Setup with Makefile
 

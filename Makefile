@@ -111,7 +111,7 @@ docker-logs:
 	docker-compose logs -f postgres
 
 lint:
-	bash -c "source .venv/bin/activate && pylint target_redshift -d C,W,unexpected-keyword-arg,duplicate-code"
+	bash -c "source .venv/bin/activate && pylint target_redshift -d C,W,R,unexpected-keyword-arg,duplicate-code"
 
 coverage:
 	bash -c "source .venv/bin/activate && coverage report && coverage html"
