@@ -426,9 +426,11 @@ This project uses GitHub Actions for continuous integration and deployment:
 - Executes linting (pylint) to maintain code quality
 - Runs all unit tests with coverage reporting
 - Uploads coverage to Codecov (optional)
+- **Secret scanning with Gitleaks** - Detects hardcoded credentials and sensitive data
 
 **Workflows:**
 - `.github/workflows/ci.yml` - Main CI pipeline with unit tests
+- `.github/workflows/security.yml` - Security checks (Gitleaks secret scanning)
 - `.github/workflows/pythonpublish.yml` - PyPI publishing on release
 
 **Testing in CI:**
@@ -441,6 +443,56 @@ coverage report
 The CI pipeline ensures all contributions are tested and validated before merging.
 
 **Note:** Mock integration tests with Docker are available locally via `make test-mock-integration` but are not run in CI to keep builds fast and simple.
+
+### Security
+
+**Secret Scanning with Gitleaks:**
+
+This project uses [Gitleaks](https://github.com/gitleaks/gitleaks) to prevent hardcoded secrets from being committed.
+
+**Pre-commit Hook (Recommended):**
+
+Install pre-commit hooks to catch secrets before committing:
+
+```bash
+# Install pre-commit
+pip install pre-commit
+
+# Install the git hook scripts
+pre-commit install
+
+# (Optional) Run against all files
+pre-commit run --all-files
+```
+
+The pre-commit hook will automatically:
+- Scan for hardcoded secrets (API keys, passwords, tokens)
+- Check for trailing whitespace and file formatting
+- Validate YAML files
+- Detect private keys
+- Check for large files
+
+**Manual Scanning:**
+
+You can also run Gitleaks manually:
+
+```bash
+# Install gitleaks (macOS)
+brew install gitleaks
+
+# Scan current changes
+gitleaks detect --verbose
+
+# Scan entire history
+gitleaks detect --verbose --log-opts="--all"
+```
+
+**Configuration:**
+
+Gitleaks configuration is in `.gitleaks.toml` with allowlisted paths for:
+- Test fixtures and example data
+- Documentation with example credentials
+- Mock integration test data
 
 ### Quick Setup with Makefile
 

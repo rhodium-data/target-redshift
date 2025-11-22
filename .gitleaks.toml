@@ -1,0 +1,34 @@
+# Gitleaks configuration for target-redshift
+# https://github.com/gitleaks/gitleaks
+
+title = "target-redshift gitleaks config"
+
+# Extend the default gitleaks config
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist for known false positives"
+
+# Allow example/test credentials in documentation
+paths = [
+    '''README\.md''',
+    '''tests/integration/resources/.*\.json''',
+    '''tests/mock_integration/init-db\.sql''',
+]
+
+# Regex patterns for known false positives
+regexes = [
+    '''test_user''',
+    '''test_password''',
+    '''test_db''',
+    '''example\.com''',
+    '''localhost''',
+    '''127\.0\.0\.1''',
+]
+
+# Allow specific commits (add commit SHAs here if needed)
+commits = []
+
+# Stopwords - prevent detection of these as secrets
+stopwords = []
