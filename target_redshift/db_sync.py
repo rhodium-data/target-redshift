@@ -7,12 +7,10 @@ import sys
 import time
 
 import boto3
+import inflection
 import psycopg2
 import psycopg2.extras
-
-import inflection
 from singer import get_logger
-
 
 DEFAULT_VARCHAR_LENGTH = 10000
 SHORT_VARCHAR_LENGTH = 256

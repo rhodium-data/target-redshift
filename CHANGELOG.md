@@ -1,3 +1,19 @@
+1.0.1 (2025-11-24)
+-------------------
+
+**Test Coverage Improvements**
+
+- Add 7 new mock integration tests covering nested objects, upserts, multiple streams, schema evolution, reserved words, and soft deletes
+- Add 4 new integration tests for table cache, data flattening, AWS session tokens, and empty streams
+- Improve unit test quality by replacing trivial exception tests with 18 meaningful tests covering edge cases and actual behavior
+- Add comprehensive tests for helper functions (chunk_iterable, ceiling_division)
+- Add tests for column sanitization and SQL reserved word handling
+- Add tests for date/time format handling and type conversion edge cases
+- Total test count increased from 98 to 119 tests (all passing)
+- Add Gitleaks integration for detecting hardcoded secrets in code
+- Add pre-commit hooks configuration for automated code quality checks
+- Add security scanning workflow in GitHub Actions
+
 1.0.0 (2025-11-21)
 -------------------
 

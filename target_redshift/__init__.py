@@ -1,25 +1,25 @@
 #!/usr/bin/env python3
 
 import argparse
+import bz2
+import copy
+import gzip
 import io
 import json
 import os
 import sys
-import copy
-import gzip
-import bz2
 from datetime import datetime
 from decimal import Decimal
+from itertools import islice
 from tempfile import mkstemp
 
 from joblib import Parallel, delayed, parallel_backend
 from jsonschema import Draft7Validator, FormatChecker
 from singer import get_logger
-from itertools import islice
 
 from target_redshift.db_sync import DbSync
 
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 
 LOGGER = get_logger('target_redshift')
 
@@ -347,7 +347,7 @@ def flush_streams(
 
 
 def load_stream_batch(stream, records_to_load, row_count, db_sync, delete_rows=False, compression=None, slices=None, temp_dir=None):
-    # Load into redshift                                            
+    # Load into redshift
     try:
         if row_count[stream] > 0:
             flush_records(stream, records_to_load, row_count[stream], db_sync, compression, slices, temp_dir)
