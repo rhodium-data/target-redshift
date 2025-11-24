@@ -1075,3 +1075,75 @@ class TestTargetRedshift(object):
         target_redshift.persist_lines(self.config, tap_lines)
 
         self.assert_three_streams_are_loaded_in_redshift()
+
+    def test_table_cache_disabled(self):
+        """Test loading with table cache disabled"""
+        tap_lines = test_utils.get_test_tap_lines('messages-with-three-streams.json')
+
+        # Disable table cache
+        self.config['disable_table_cache'] = True
+        target_redshift.persist_lines(self.config, tap_lines)
+
+        self.assert_three_streams_are_loaded_in_redshift()
+
+    def test_data_flattening_off(self):
+        """Test loading nested data with data_flattening_max_level = 0 (flattening off)"""
+        tap_lines = test_utils.get_test_tap_lines('messages-with-nested-schema.json')
+
+        # Disable data flattening
+        self.config['data_flattening_max_level'] = 0
+        target_redshift.persist_lines(self.config, tap_lines)
+
+        redshift = DbSync(self.config)
+        target_schema = self.config.get('default_target_schema')
+
+        # Verify table was created
+        table = redshift.query(
+            'SELECT * FROM {}.test_table_nested_schema'.format(target_schema)
+        )
+        assert len(table) == 1
+
+        # With flattening off, nested objects should be stored as JSON strings
+        assert 'c_array' in table[0]
+        assert 'c_nested_object' in table[0]
+
+    def test_loading_with_aws_session_token(self):
+        """Test loading data using AWS session token (temporary credentials)"""
+        tap_lines = test_utils.get_test_tap_lines('messages-with-three-streams.json')
+
+        # Ensure aws_session_token is set from environment
+        if os.environ.get('TARGET_REDSHIFT_AWS_SESSION_TOKEN'):
+            self.config['aws_session_token'] = os.environ.get('TARGET_REDSHIFT_AWS_SESSION_TOKEN')
+            target_redshift.persist_lines(self.config, tap_lines)
+
+            self.assert_three_streams_are_loaded_in_redshift()
+
+    def test_loading_empty_stream(self):
+        """Test that loading a stream with no records works correctly"""
+        # Create a minimal schema-only message
+        schema_message = {
+            'type': 'SCHEMA',
+            'stream': 'empty_test_stream',
+            'schema': {
+                'properties': {
+                    'id': {'type': ['null', 'integer']},
+                    'name': {'type': ['null', 'string']}
+                }
+            },
+            'key_properties': ['id']
+        }
+
+        # Convert to lines format
+        tap_lines = [json.dumps(schema_message)]
+
+        target_redshift.persist_lines(self.config, tap_lines)
+
+        # Verify table was created even with no records
+        redshift = DbSync(self.config)
+        target_schema = self.config.get('default_target_schema')
+
+        tables = redshift.query(
+            """SELECT table_name FROM information_schema.tables
+               WHERE table_schema = '{}' AND table_name = 'empty_test_stream'""".format(target_schema)
+        )
+        assert len(tables) == 1
