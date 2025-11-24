@@ -1,8 +1,11 @@
 """Unit tests for target_redshift utility functions"""
 import pytest
+import json
 from datetime import datetime
 from decimal import Decimal
+from unittest import mock
 import target_redshift
+from target_redshift import RecordValidationException, InvalidValidationOperationException
 
 
 class TestUtilityFunctions:
@@ -192,3 +195,265 @@ class TestUtilityFunctions:
         captured = capsys.readouterr()
         # Should not emit anything for None
         assert captured.out == ''
+
+
+class TestRecordProcessing:
+    """Test record processing and validation"""
+
+    def test_record_validation_exception(self):
+        """Test RecordValidationException can be raised"""
+        with pytest.raises(RecordValidationException) as exc_info:
+            raise RecordValidationException("Invalid record")
+        assert "Invalid record" in str(exc_info.value)
+
+    def test_invalid_validation_operation_exception(self):
+        """Test InvalidValidationOperationException can be raised"""
+        with pytest.raises(InvalidValidationOperationException) as exc_info:
+            raise InvalidValidationOperationException("Invalid operation")
+        assert "Invalid operation" in str(exc_info.value)
+
+
+class TestDbSyncUtilities:
+    """Test additional db_sync utility functions"""
+
+    def test_column_type_with_integer_and_string(self):
+        """Test column type for mixed integer/string"""
+        from target_redshift.db_sync import column_type
+
+        schema_property = {
+            'type': ['null', 'integer', 'string']
+        }
+        result = column_type(schema_property)
+        assert 'character varying' in result
+        # Should default to LONG_VARCHAR_LENGTH
+        assert '65535' in result
+
+    def test_column_type_boolean(self):
+        """Test column type for boolean"""
+        from target_redshift.db_sync import column_type
+
+        schema_property = {
+            'type': ['null', 'boolean']
+        }
+        result = column_type(schema_property, with_length=False)
+        assert result == 'boolean'
+
+    def test_column_type_number(self):
+        """Test column type for number (float)"""
+        from target_redshift.db_sync import column_type
+
+        schema_property = {
+            'type': ['null', 'number']
+        }
+        result = column_type(schema_property, with_length=False)
+        assert result == 'double precision'
+
+    def test_column_trans_with_super_type(self):
+        """Test column transformation for SUPER type"""
+        from target_redshift.db_sync import column_trans
+
+        # Test with 'super' in type
+        schema_property = {
+            'type': ['null', 'super']
+        }
+        result = column_trans(schema_property)
+        assert result == ''
+
+    def test_column_trans_with_super_format(self):
+        """Test column transformation for SUPER format"""
+        from target_redshift.db_sync import column_trans
+
+        # Test with format='super'
+        schema_property = {
+            'type': ['null', 'string'],
+            'format': 'super'
+        }
+        result = column_trans(schema_property)
+        assert result == ''
+
+    def test_column_trans_with_object(self):
+        """Test column transformation for object type"""
+        from target_redshift.db_sync import column_trans
+
+        schema_property = {
+            'type': ['null', 'object']
+        }
+        result = column_trans(schema_property)
+        assert result == 'parse_json'
+
+    def test_column_trans_with_array(self):
+        """Test column transformation for array type"""
+        from target_redshift.db_sync import column_trans
+
+        schema_property = {
+            'type': ['null', 'array']
+        }
+        result = column_trans(schema_property)
+        assert result == 'parse_json'
+
+    def test_column_trans_with_string(self):
+        """Test column transformation for plain string"""
+        from target_redshift.db_sync import column_trans
+
+        schema_property = {
+            'type': ['null', 'string']
+        }
+        result = column_trans(schema_property)
+        assert result == ''
+
+    def test_flatten_key_simple(self):
+        """Test flatten_key with simple key"""
+        from target_redshift.db_sync import flatten_key
+
+        result = flatten_key('child', ['parent'], '__')
+        assert result == 'parent__child'
+
+    def test_flatten_key_with_empty_parent(self):
+        """Test flatten_key with no parent"""
+        from target_redshift.db_sync import flatten_key
+
+        result = flatten_key('key', [], '__')
+        assert result == 'key'
+
+    def test_flatten_key_with_multiple_parents(self):
+        """Test flatten_key with nested parents"""
+        from target_redshift.db_sync import flatten_key
+
+        result = flatten_key('child', ['grandparent', 'parent'], '__')
+        assert result == 'grandparent__parent__child'
+
+    def test_primary_column_names_single_key(self):
+        """Test extracting primary key from schema"""
+        from target_redshift.db_sync import primary_column_names
+
+        stream_schema_message = {
+            'key_properties': ['id']
+        }
+        result = primary_column_names(stream_schema_message)
+        assert result == ['"ID"']
+
+    def test_primary_column_names_composite_key(self):
+        """Test extracting composite primary key"""
+        from target_redshift.db_sync import primary_column_names
+
+        stream_schema_message = {
+            'key_properties': ['org_id', 'user_id']
+        }
+        result = primary_column_names(stream_schema_message)
+        assert result == ['"ORG_ID"', '"USER_ID"']
+
+    def test_primary_column_names_no_keys(self):
+        """Test extracting primary keys when none defined"""
+        from target_redshift.db_sync import primary_column_names
+
+        stream_schema_message = {
+            'key_properties': []
+        }
+        result = primary_column_names(stream_schema_message)
+        assert result == []
+
+    def test_stream_name_to_dict_full(self):
+        """Test parsing stream name with catalog-schema-table"""
+        from target_redshift.db_sync import stream_name_to_dict
+
+        result = stream_name_to_dict('my_catalog-my_schema-my_table')
+        assert result['catalog_name'] == 'my_catalog'
+        assert result['schema_name'] == 'my_schema'
+        assert result['table_name'] == 'my_table'
+
+    def test_stream_name_to_dict_schema_table(self):
+        """Test parsing stream name with schema-table"""
+        from target_redshift.db_sync import stream_name_to_dict
+
+        result = stream_name_to_dict('my_schema-my_table')
+        assert result['catalog_name'] is None
+        assert result['schema_name'] == 'my_schema'
+        assert result['table_name'] == 'my_table'
+
+    def test_stream_name_to_dict_table_only(self):
+        """Test parsing stream name with table only"""
+        from target_redshift.db_sync import stream_name_to_dict
+
+        result = stream_name_to_dict('my_table')
+        assert result['catalog_name'] is None
+        assert result['schema_name'] is None
+        assert result['table_name'] == 'my_table'
+
+    def test_stream_name_to_dict_custom_separator(self):
+        """Test parsing stream name with custom separator"""
+        from target_redshift.db_sync import stream_name_to_dict
+
+        result = stream_name_to_dict('catalog_schema_table', separator='_')
+        assert result['catalog_name'] == 'catalog'
+        assert result['schema_name'] == 'schema'
+        assert result['table_name'] == 'table'
+
+    def test_should_json_dump_value_with_dict(self):
+        """Test _should_json_dump_value with dictionary"""
+        from target_redshift.db_sync import _should_json_dump_value
+
+        value = {'key': 'value'}
+        result = _should_json_dump_value('field', value)
+        assert result is True
+
+    def test_should_json_dump_value_with_list(self):
+        """Test _should_json_dump_value with list"""
+        from target_redshift.db_sync import _should_json_dump_value
+
+        value = [1, 2, 3]
+        result = _should_json_dump_value('field', value)
+        assert result is True
+
+    def test_should_json_dump_value_with_string(self):
+        """Test _should_json_dump_value with string"""
+        from target_redshift.db_sync import _should_json_dump_value
+
+        value = "simple string"
+        result = _should_json_dump_value('field', value)
+        assert result is False
+
+    def test_should_json_dump_value_with_flatten_schema_requiring_dump(self):
+        """Test _should_json_dump_value with flatten schema that requires JSON dump"""
+        from target_redshift.db_sync import _should_json_dump_value
+
+        flatten_schema = {
+            'field': {'type': 'string'}  # Will require JSON dump for complex types
+        }
+        value = {'nested': 'object'}
+        result = _should_json_dump_value('field', value, flatten_schema)
+        assert result is True
+
+
+class TestLoadTableCache:
+    """Test load_table_cache function"""
+
+    @mock.patch('target_redshift.DbSync')
+    def test_load_table_cache_enabled(self, mock_db_sync):
+        """Test load_table_cache when cache is enabled"""
+        mock_db_instance = mock.Mock()
+        mock_db_instance.get_table_columns.return_value = [
+            {'schema': 'public', 'table': 'users', 'column': 'id'},
+            {'schema': 'public', 'table': 'users', 'column': 'name'}
+        ]
+        mock_db_sync.return_value = mock_db_instance
+
+        config = {
+            'host': 'localhost',
+            'default_target_schema': 'public'
+        }
+
+        result = target_redshift.load_table_cache(config)
+
+        assert len(result) == 2
+        mock_db_instance.get_table_columns.assert_called_once()
+
+    def test_load_table_cache_disabled(self):
+        """Test load_table_cache when cache is disabled"""
+        config = {
+            'host': 'localhost',
+            'disable_table_cache': True
+        }
+
+        result = target_redshift.load_table_cache(config)
+
+        assert result == []
