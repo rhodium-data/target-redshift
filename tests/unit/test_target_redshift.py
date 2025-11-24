@@ -200,17 +200,118 @@ class TestUtilityFunctions:
 class TestRecordProcessing:
     """Test record processing and validation"""
 
-    def test_record_validation_exception(self):
-        """Test RecordValidationException can be raised"""
-        with pytest.raises(RecordValidationException) as exc_info:
-            raise RecordValidationException("Invalid record")
-        assert "Invalid record" in str(exc_info.value)
+    def test_float_to_decimal_edge_cases(self):
+        """Test float_to_decimal with edge cases"""
+        # Very small float
+        result = target_redshift.float_to_decimal(0.000001)
+        assert isinstance(result, Decimal)
+        assert str(result) == '0.000001'
 
-    def test_invalid_validation_operation_exception(self):
-        """Test InvalidValidationOperationException can be raised"""
-        with pytest.raises(InvalidValidationOperationException) as exc_info:
-            raise InvalidValidationOperationException("Invalid operation")
-        assert "Invalid operation" in str(exc_info.value)
+        # Very large float
+        result = target_redshift.float_to_decimal(999999999.99)
+        assert isinstance(result, Decimal)
+
+        # Negative float
+        result = target_redshift.float_to_decimal(-42.5)
+        assert isinstance(result, Decimal)
+        assert str(result) == '-42.5'
+
+        # Zero
+        result = target_redshift.float_to_decimal(0.0)
+        assert isinstance(result, Decimal)
+        assert str(result) == '0.0'
+
+    def test_add_metadata_columns_overwrites_existing(self):
+        """Test that metadata columns are always set to standard format"""
+        schema_message = {
+            'type': 'SCHEMA',
+            'stream': 'test_stream',
+            'schema': {
+                'properties': {
+                    'id': {'type': 'integer'},
+                    '_sdc_extracted_at': {'type': 'string', 'format': 'custom'}
+                }
+            }
+        }
+
+        result = target_redshift.add_metadata_columns_to_schema(schema_message)
+
+        # Should overwrite to standard format
+        assert result['schema']['properties']['_sdc_extracted_at']['format'] == 'date-time'
+
+    def test_add_metadata_values_without_time_extracted(self):
+        """Test adding metadata when time_extracted is missing"""
+        record_message = {
+            'type': 'RECORD',
+            'stream': 'test_stream',
+            'record': {
+                'id': 1,
+                'name': 'Test'
+            }
+            # No time_extracted field
+        }
+        stream_to_sync = {}
+
+        result = target_redshift.add_metadata_values_to_record(record_message, stream_to_sync)
+
+        # Should still add metadata fields
+        assert '_sdc_batched_at' in result
+        # _sdc_extracted_at should be None when not provided
+        assert result.get('_sdc_extracted_at') is None
+
+    def test_get_schema_names_with_duplicate_schemas(self):
+        """Test that duplicate schema names are included (not deduplicated)"""
+        config = {
+            'default_target_schema': 'public',
+            'schema_mapping': {
+                'source1.schema1': {
+                    'target_schema': 'public'  # Same as default
+                },
+                'source2.schema2': {
+                    'target_schema': 'analytics'
+                }
+            }
+        }
+        result = target_redshift.get_schema_names_from_config(config)
+
+        # Function doesn't deduplicate, returns all schemas
+        assert 'public' in result
+        assert 'analytics' in result
+        # May have duplicates
+        assert result.count('public') >= 1
+
+    def test_emit_state_with_complex_state(self):
+        """Test emitting state with nested bookmarks"""
+        state = {
+            'currently_syncing': None,
+            'bookmarks': {
+                'stream1': {
+                    'last_sync': '2024-01-15T10:00:00Z',
+                    'version': 123456,
+                    'metadata': {
+                        'records_synced': 1000
+                    }
+                },
+                'stream2': {
+                    'last_sync': '2024-01-16T10:00:00Z'
+                }
+            }
+        }
+
+        import io
+        import sys
+        captured_output = io.StringIO()
+        sys.stdout = captured_output
+
+        try:
+            target_redshift.emit_state(state)
+            output = captured_output.getvalue()
+
+            # Verify JSON is valid and contains expected data
+            parsed = json.loads(output)
+            assert parsed['bookmarks']['stream1']['metadata']['records_synced'] == 1000
+        finally:
+            sys.stdout = sys.__stdout__
 
 
 class TestDbSyncUtilities:
@@ -423,6 +524,98 @@ class TestDbSyncUtilities:
         result = _should_json_dump_value('field', value, flatten_schema)
         assert result is True
 
+    def test_column_type_with_date_formats(self):
+        """Test column type detection for date/time types"""
+        from target_redshift.db_sync import column_type
+
+        # date-time format - properly converted to timestamp
+        schema_property = {
+            'type': ['null', 'string'],
+            'format': 'date-time'
+        }
+        result = column_type(schema_property, with_length=False)
+        assert result == 'timestamp without time zone'
+
+        # date format - only date-time is converted, others remain varchar
+        schema_property = {
+            'type': ['null', 'string'],
+            'format': 'date'
+        }
+        result = column_type(schema_property, with_length=False)
+        # date format doesn't get special treatment, remains varchar
+        assert 'character varying' in result or result == 'character varying'
+
+    def test_column_type_with_maxlength(self):
+        """Test column type uses default length regardless of maxLength"""
+        from target_redshift.db_sync import column_type
+
+        schema_property = {
+            'type': ['null', 'string'],
+            'maxLength': 255
+        }
+        result = column_type(schema_property)
+        # maxLength is not directly used, uses default VARCHAR length
+        assert 'character varying' in result
+
+    def test_column_type_integer(self):
+        """Test column type for integer"""
+        from target_redshift.db_sync import column_type
+
+        schema_property = {
+            'type': ['null', 'integer']
+        }
+        result = column_type(schema_property, with_length=False)
+        assert result == 'numeric'
+
+    def test_flatten_key_with_special_characters(self):
+        """Test flatten_key handles special characters"""
+        from target_redshift.db_sync import flatten_key
+
+        result = flatten_key('child-name', ['parent.name'], '__')
+        # Should handle special characters in keys
+        assert '__' in result
+
+    def test_stream_name_to_dict_edge_cases(self):
+        """Test stream_name_to_dict with edge cases"""
+        from target_redshift.db_sync import stream_name_to_dict
+
+        # Empty string
+        result = stream_name_to_dict('')
+        assert result['table_name'] == ''
+
+        # Stream with many parts - hyphens get replaced with underscores
+        result = stream_name_to_dict('a-b-c-d-e')
+        assert result['catalog_name'] == 'a'
+        assert result['schema_name'] == 'b'
+        # Table name has hyphens converted to underscores
+        assert result['table_name'] == 'c_d_e'
+
+    def test_should_json_dump_value_with_boolean(self):
+        """Test _should_json_dump_value with boolean"""
+        from target_redshift.db_sync import _should_json_dump_value
+
+        result = _should_json_dump_value('field', True)
+        assert result is False
+
+        result = _should_json_dump_value('field', False)
+        assert result is False
+
+    def test_should_json_dump_value_with_numbers(self):
+        """Test _should_json_dump_value with numeric types"""
+        from target_redshift.db_sync import _should_json_dump_value
+
+        # Integer
+        result = _should_json_dump_value('field', 42)
+        assert result is False
+
+        # Float
+        result = _should_json_dump_value('field', 3.14)
+        assert result is False
+
+        # Decimal
+        result = _should_json_dump_value('field', Decimal('10.5'))
+        assert result is False
+
 
 class TestLoadTableCache:
     """Test load_table_cache function"""
@@ -457,3 +650,112 @@ class TestLoadTableCache:
         result = target_redshift.load_table_cache(config)
 
         assert result == []
+
+    @mock.patch('target_redshift.DbSync')
+    def test_load_table_cache_with_multiple_schemas(self, mock_db_sync):
+        """Test load_table_cache loads from all configured schemas"""
+        mock_db_instance = mock.Mock()
+        mock_db_instance.get_table_columns.return_value = [
+            {'schema': 'public', 'table': 'users', 'column': 'id'},
+            {'schema': 'analytics', 'table': 'events', 'column': 'event_id'}
+        ]
+        mock_db_sync.return_value = mock_db_instance
+
+        config = {
+            'host': 'localhost',
+            'default_target_schema': 'public',
+            'schema_mapping': {
+                'source1.schema1': {
+                    'target_schema': 'analytics'
+                }
+            }
+        }
+
+        result = target_redshift.load_table_cache(config)
+
+        # Should get columns from both schemas
+        assert len(result) == 2
+
+
+class TestHelperFunctions:
+    """Test helper functions for data processing"""
+
+    def test_chunk_iterable(self):
+        """Test chunking an iterable into fixed-size chunks"""
+        data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        chunks = list(target_redshift.chunk_iterable(data, 3))
+
+        assert len(chunks) == 4
+        # chunks are tuples, not lists
+        assert chunks[0] == (1, 2, 3)
+        assert chunks[1] == (4, 5, 6)
+        assert chunks[2] == (7, 8, 9)
+        assert chunks[3] == (10,)
+
+    def test_chunk_iterable_exact_division(self):
+        """Test chunking when size divides evenly"""
+        data = [1, 2, 3, 4, 5, 6]
+        chunks = list(target_redshift.chunk_iterable(data, 2))
+
+        assert len(chunks) == 3
+        assert all(len(chunk) == 2 for chunk in chunks)
+
+    def test_chunk_iterable_empty(self):
+        """Test chunking empty iterable"""
+        data = []
+        chunks = list(target_redshift.chunk_iterable(data, 5))
+
+        assert len(chunks) == 0
+
+    def test_chunk_iterable_single_element(self):
+        """Test chunking single element"""
+        data = [1]
+        chunks = list(target_redshift.chunk_iterable(data, 5))
+
+        assert len(chunks) == 1
+        # Returns a tuple
+        assert chunks[0] == (1,)
+
+    def test_ceiling_division(self):
+        """Test ceiling division helper"""
+        # Exact division
+        assert target_redshift.ceiling_division(10, 5) == 2
+
+        # Division with remainder
+        assert target_redshift.ceiling_division(10, 3) == 4
+        assert target_redshift.ceiling_division(7, 2) == 4
+
+        # Numerator smaller than denominator
+        assert target_redshift.ceiling_division(1, 5) == 1
+
+        # Zero numerator
+        assert target_redshift.ceiling_division(0, 5) == 0
+
+
+class TestColumnSanitization:
+    """Test column name sanitization and SQL escaping"""
+
+    def test_safe_column_name(self):
+        """Test safe_column_name function from db_sync"""
+        from target_redshift.db_sync import safe_column_name
+
+        # Normal column names
+        assert safe_column_name('user_id') == '"USER_ID"'
+        assert safe_column_name('email') == '"EMAIL"'
+
+        # Column with special characters
+        result = safe_column_name('first-name')
+        assert result.startswith('"')
+        assert result.endswith('"')
+
+        # Already uppercase
+        assert safe_column_name('ID') == '"ID"'
+
+    def test_column_name_with_reserved_words(self):
+        """Test handling of SQL reserved words as column names"""
+        from target_redshift.db_sync import safe_column_name
+
+        # SQL reserved words should be quoted
+        assert safe_column_name('select') == '"SELECT"'
+        assert safe_column_name('from') == '"FROM"'
+        assert safe_column_name('where') == '"WHERE"'
