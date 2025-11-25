@@ -3,6 +3,8 @@ import os
 import json
 import mock
 import datetime
+import time
+from contextlib import contextmanager
 
 import target_redshift
 from target_redshift import RecordValidationException
@@ -38,6 +40,30 @@ class TestTargetRedshift(object):
 
     def teardown_method(self):
         pass
+
+    @contextmanager
+    def capture_copy_commands(self):
+        """
+        Context manager to capture COPY commands executed during a test.
+        Returns a list that will be populated with COPY SQL commands.
+        """
+        from unittest import mock
+        import psycopg2.extras
+        captured_queries = []
+
+        # Get the original execute method from DictCursor
+        original_execute = psycopg2.extras.DictCursor.execute
+
+        def execute_wrapper(self, query, vars=None):
+            # Capture COPY commands
+            if query and 'COPY' in str(query).upper():
+                captured_queries.append(query)
+            # Execute the original query
+            return original_execute(self, query, vars)
+
+        # Patch the cursor execute method
+        with mock.patch.object(psycopg2.extras.DictCursor, 'execute', execute_wrapper):
+            yield captured_queries
 
     def remove_metadata_columns_from_rows(self, rows):
         """Removes metadata columns from a list of rows"""
@@ -787,11 +813,27 @@ class TestTargetRedshift(object):
         """Test loading data with custom copy options"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-three-streams.json")
 
-        # Loading with identical copy option should pass
+        # Loading with custom copy options - capture COPY commands during execution
         self.config[
             "copy_options"
         ] = "EMPTYASNULL TRIMBLANKS FILLRECORD TRUNCATECOLUMNS"
-        target_redshift.persist_lines(self.config, tap_lines)
+
+        with self.capture_copy_commands() as copy_commands:
+            target_redshift.persist_lines(self.config, tap_lines)
+
+        # Verify custom COPY options were included in the COPY command
+        assert len(copy_commands) > 0, "No COPY command was executed"
+
+        # Check all COPY commands contain the custom options
+        copy_command = copy_commands[0]
+        assert "EMPTYASNULL" in copy_command, \
+            f"EMPTYASNULL option missing from COPY command: {copy_command}"
+        assert "TRIMBLANKS" in copy_command, \
+            f"TRIMBLANKS option missing from COPY command: {copy_command}"
+        assert "FILLRECORD" in copy_command, \
+            f"FILLRECORD option missing from COPY command: {copy_command}"
+        assert "TRUNCATECOLUMNS" in copy_command, \
+            f"TRUNCATECOLUMNS option missing from COPY command: {copy_command}"
 
     def test_copy_using_aws_environment(self):
         """Test loading data with aws in the environment rather than explicitly provided access keys"""
@@ -807,19 +849,56 @@ class TestTargetRedshift(object):
             self.config["aws_access_key_id"] = None
             self.config["aws_secret_access_key"] = None
 
-            target_redshift.persist_lines(self.config, tap_lines)
+            with self.capture_copy_commands() as copy_commands:
+                target_redshift.persist_lines(self.config, tap_lines)
+
+            # Verify COPY command uses ACCESS_KEY_ID (credentials) not IAM_ROLE
+            assert len(copy_commands) > 0, "No COPY command was executed"
+
+            copy_command = copy_commands[0]
+            # When using credentials (from environment or config), the COPY command should contain ACCESS_KEY_ID
+            assert "ACCESS_KEY_ID" in copy_command, \
+                f"COPY command should use ACCESS_KEY_ID when credentials provided via environment: {copy_command}"
+            # Should NOT use IAM_ROLE when credentials are provided
+            assert "IAM_ROLE" not in copy_command, \
+                f"COPY command should not use IAM_ROLE when credentials provided: {copy_command}"
         finally:
-            del os.environ["AWS_ACCESS_KEY_ID"]
-            del os.environ["AWS_SECRET_ACCESS_KEY"]
+            if "AWS_ACCESS_KEY_ID" in os.environ:
+                del os.environ["AWS_ACCESS_KEY_ID"]
+            if "AWS_SECRET_ACCESS_KEY" in os.environ:
+                del os.environ["AWS_SECRET_ACCESS_KEY"]
 
     def test_copy_using_role_arn(self):
         """Test loading data with aws role arn rather than aws access keys"""
         tap_lines = test_utils.get_test_tap_lines("messages-with-three-streams.json")
 
-        self.config["aws_redshift_copy_role_arn"] = os.environ.get(
-            "TARGET_REDSHIFT_AWS_REDSHIFT_COPY_ROLE_ARN"
-        )
-        target_redshift.persist_lines(self.config, tap_lines)
+        # Get role ARN from environment
+        role_arn = os.environ.get("TARGET_REDSHIFT_AWS_REDSHIFT_COPY_ROLE_ARN")
+
+        # Skip test if role ARN not configured
+        if not role_arn:
+            pytest.skip("TARGET_REDSHIFT_AWS_REDSHIFT_COPY_ROLE_ARN not configured")
+
+        self.config["aws_redshift_copy_role_arn"] = role_arn
+
+        with self.capture_copy_commands() as copy_commands:
+            target_redshift.persist_lines(self.config, tap_lines)
+
+        # Verify COPY command uses IAM_ROLE not ACCESS_KEY_ID
+        assert len(copy_commands) > 0, "No COPY command was executed"
+
+        copy_command = copy_commands[0]
+        copy_command_upper = copy_command.upper()
+
+        # When using IAM role, the COPY command should contain IAM_ROLE (case-insensitive)
+        assert "IAM_ROLE" in copy_command_upper, \
+            f"COPY command should use IAM_ROLE when role ARN provided: {copy_command}"
+        # Verify the specific role ARN is in the command
+        assert role_arn in copy_command, \
+            f"COPY command should contain the role ARN '{role_arn}': {copy_command}"
+        # Should NOT use ACCESS_KEY_ID when role is provided
+        assert "ACCESS_KEY_ID" not in copy_command_upper, \
+            f"COPY command should not use ACCESS_KEY_ID when IAM role provided: {copy_command}"
 
     def test_invalid_custom_copy_options(self):
         """Tests loading data with custom copy options"""
