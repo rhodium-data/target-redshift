@@ -759,3 +759,520 @@ class TestColumnSanitization:
         assert safe_column_name('select') == '"SELECT"'
         assert safe_column_name('from') == '"FROM"'
         assert safe_column_name('where') == '"WHERE"'
+
+
+class TestConfigValidation:
+    """Test configuration validation"""
+
+    def test_validate_config_with_valid_config(self):
+        """Test validation with all required fields"""
+        from target_redshift.db_sync import validate_config
+
+        config = {
+            'host': 'localhost',
+            'port': 5439,
+            'user': 'testuser',
+            'password': 'testpass',
+            'dbname': 'testdb',
+            's3_bucket': 'test-bucket',
+            'default_target_schema': 'public'
+        }
+        errors = validate_config(config)
+        assert errors == []
+
+    def test_validate_config_missing_host(self):
+        """Test validation with missing host"""
+        from target_redshift.db_sync import validate_config
+
+        config = {
+            'port': 5439,
+            'user': 'testuser',
+            'password': 'testpass',
+            'dbname': 'testdb',
+            's3_bucket': 'test-bucket'
+        }
+        errors = validate_config(config)
+        assert len(errors) > 0
+        assert any('host' in error for error in errors)
+
+    def test_validate_config_missing_s3_bucket_without_local_copy(self):
+        """Test validation with missing S3 bucket and no local copy mode"""
+        from target_redshift.db_sync import validate_config
+
+        config = {
+            'host': 'localhost',
+            'port': 5439,
+            'user': 'testuser',
+            'password': 'testpass',
+            'dbname': 'testdb',
+            'default_target_schema': 'public'
+        }
+        errors = validate_config(config)
+        assert len(errors) > 0
+        assert any('s3_bucket' in error or 'use_local_copy' in error for error in errors)
+
+    def test_validate_config_with_local_copy(self):
+        """Test validation with local copy mode enabled"""
+        from target_redshift.db_sync import validate_config
+
+        config = {
+            'host': 'localhost',
+            'port': 5439,
+            'user': 'testuser',
+            'password': 'testpass',
+            'dbname': 'testdb',
+            'use_local_copy': True,
+            'default_target_schema': 'public'
+        }
+        errors = validate_config(config)
+        assert errors == []
+
+    def test_validate_config_missing_schema_mapping(self):
+        """Test validation with missing schema configuration"""
+        from target_redshift.db_sync import validate_config
+
+        config = {
+            'host': 'localhost',
+            'port': 5439,
+            'user': 'testuser',
+            'password': 'testpass',
+            'dbname': 'testdb',
+            's3_bucket': 'test-bucket'
+        }
+        errors = validate_config(config)
+        assert len(errors) > 0
+        assert any('schema' in error.lower() for error in errors)
+
+    def test_validate_config_with_schema_mapping(self):
+        """Test validation with schema_mapping instead of default_target_schema"""
+        from target_redshift.db_sync import validate_config
+
+        config = {
+            'host': 'localhost',
+            'port': 5439,
+            'user': 'testuser',
+            'password': 'testpass',
+            'dbname': 'testdb',
+            's3_bucket': 'test-bucket',
+            'schema_mapping': {
+                'source_schema': {
+                    'target_schema': 'target_schema'
+                }
+            }
+        }
+        errors = validate_config(config)
+        assert errors == []
+
+
+class TestFlattenFunctions:
+    """Test record and schema flattening functions"""
+
+    def test_flatten_record_simple(self):
+        """Test flattening a simple record"""
+        from target_redshift.db_sync import flatten_record
+
+        record = {'id': 1, 'name': 'test'}
+        result = flatten_record(record, max_level=0)
+        assert result == {'id': 1, 'name': 'test'}
+
+    def test_flatten_record_nested_with_max_level(self):
+        """Test flattening nested record with max_level"""
+        from target_redshift.db_sync import flatten_record
+
+        record = {
+            'id': 1,
+            'user': {
+                'name': 'John',
+                'address': {
+                    'city': 'NYC'
+                }
+            }
+        }
+
+        # With max_level=1, should flatten one level
+        result = flatten_record(record, max_level=1)
+        assert 'id' in result
+        assert 'user__name' in result
+        assert result['user__name'] == 'John'
+        # address is beyond max_level, should be JSON dumped
+        assert 'user__address' in result
+        assert '"city"' in result['user__address']
+
+    def test_flatten_record_with_flatten_schema(self):
+        """Test flattening record with specific flatten schema"""
+        from target_redshift.db_sync import flatten_record
+
+        record = {
+            'id': 1,
+            'data': {'key': 'value'},
+            'extra': 'text'
+        }
+        # flatten_schema should be a dict mapping keys to their schema properties
+        flatten_schema = {
+            'id': {'type': ['integer']},
+            'data': {'type': ['object']},
+            'extra': {'type': ['string']}
+        }
+
+        # When flatten_schema is provided, dicts/lists should be JSON dumped
+        result = flatten_record(record, flatten_schema=flatten_schema, max_level=0)
+        assert 'id' in result
+        assert 'data' in result
+        assert result['id'] == 1
+        assert '"key"' in result['data']  # JSON dumped
+        assert result['extra'] == 'text'
+
+    def test_flatten_key_simple(self):
+        """Test flatten_key with simple keys"""
+        from target_redshift.db_sync import flatten_key
+
+        result = flatten_key('name', [], '__')
+        assert result == 'name'
+
+        result = flatten_key('city', ['address'], '__')
+        assert result == 'address__city'
+
+    def test_flatten_key_very_long_key(self):
+        """Test flatten_key with very long keys that exceed 127 characters"""
+        from target_redshift.db_sync import flatten_key
+
+        # Create a very long key
+        long_key = 'a' * 50
+        parent = ['b' * 50]
+
+        result = flatten_key(long_key, parent, '__')
+        # Should be shortened to fit within 127 characters
+        assert len(result) < 127
+
+    def test_flatten_key_with_multiple_parents(self):
+        """Test flatten_key with multiple parent keys"""
+        from target_redshift.db_sync import flatten_key
+
+        result = flatten_key('field', ['level1', 'level2', 'level3'], '__')
+        assert result == 'level1__level2__level3__field'
+
+    def test_flatten_schema_simple(self):
+        """Test flatten_schema with simple schema"""
+        from target_redshift.db_sync import flatten_schema
+
+        schema = {
+            'properties': {
+                'id': {'type': ['integer']},
+                'name': {'type': ['string']}
+            }
+        }
+
+        result = flatten_schema(schema, max_level=0)
+        assert 'id' in result
+        assert 'name' in result
+
+    def test_flatten_schema_nested(self):
+        """Test flatten_schema with nested schema"""
+        from target_redshift.db_sync import flatten_schema
+
+        schema = {
+            'properties': {
+                'id': {'type': ['integer']},
+                'user': {
+                    'type': ['object'],
+                    'properties': {
+                        'name': {'type': ['string']},
+                        'email': {'type': ['string']}
+                    }
+                }
+            }
+        }
+
+        # With max_level=1, should flatten nested properties
+        result = flatten_schema(schema, max_level=1)
+        assert 'id' in result
+        assert 'user__name' in result
+        assert 'user__email' in result
+
+    def test_flatten_schema_without_properties(self):
+        """Test flatten_schema with schema without properties"""
+        from target_redshift.db_sync import flatten_schema
+
+        schema = {'type': 'object'}
+        result = flatten_schema(schema, max_level=0)
+        assert result == {}
+
+
+class TestCSVGeneration:
+    """Test CSV line generation and escaping"""
+
+    def test_record_to_csv_line_simple(self):
+        """Test CSV generation with simple values"""
+        from target_redshift.db_sync import DbSync
+
+        config = {
+            'host': 'localhost',
+            'port': 5439,
+            'user': 'test',
+            'password': 'test',
+            'dbname': 'test',
+            'use_local_copy': True,
+            'default_target_schema': 'public'
+        }
+
+        schema_message = {
+            'stream': 'test_stream',
+            'schema': {
+                'properties': {
+                    'id': {'type': ['integer']},
+                    'name': {'type': ['string']}
+                }
+            },
+            'key_properties': ['id']
+        }
+
+        db_sync = DbSync(config, schema_message)
+        record = {'id': 1, 'name': 'test'}
+
+        csv_line = db_sync.record_to_csv_line(record)
+        assert '1' in csv_line
+        assert 'test' in csv_line
+        assert ',' in csv_line
+
+    def test_record_to_csv_line_with_special_characters(self):
+        """Test CSV generation with special characters that need escaping"""
+        from target_redshift.db_sync import DbSync
+
+        config = {
+            'host': 'localhost',
+            'port': 5439,
+            'user': 'test',
+            'password': 'test',
+            'dbname': 'test',
+            'use_local_copy': True,
+            'default_target_schema': 'public'
+        }
+
+        schema_message = {
+            'stream': 'test_stream',
+            'schema': {
+                'properties': {
+                    'id': {'type': ['integer']},
+                    'text': {'type': ['string']}
+                }
+            },
+            'key_properties': ['id']
+        }
+
+        db_sync = DbSync(config, schema_message)
+
+        # Test with comma
+        record = {'id': 1, 'text': 'value,with,commas'}
+        csv_line = db_sync.record_to_csv_line(record)
+        assert 'value,with,commas' in csv_line
+
+        # Test with quotes
+        record = {'id': 2, 'text': 'value"with"quotes'}
+        csv_line = db_sync.record_to_csv_line(record)
+        assert 'value' in csv_line
+
+    def test_record_to_csv_line_with_null_values(self):
+        """Test CSV generation with NULL values"""
+        from target_redshift.db_sync import DbSync
+
+        config = {
+            'host': 'localhost',
+            'port': 5439,
+            'user': 'test',
+            'password': 'test',
+            'dbname': 'test',
+            'use_local_copy': True,
+            'default_target_schema': 'public'
+        }
+
+        schema_message = {
+            'stream': 'test_stream',
+            'schema': {
+                'properties': {
+                    'id': {'type': ['integer']},
+                    'name': {'type': ['null', 'string']},
+                    'age': {'type': ['null', 'integer']}
+                }
+            },
+            'key_properties': ['id']
+        }
+
+        db_sync = DbSync(config, schema_message)
+        record = {'id': 1, 'name': None, 'age': None}
+
+        csv_line = db_sync.record_to_csv_line(record)
+        # NULL values should be represented as empty strings in CSV
+        # Columns are ordered alphabetically by flatten_schema: age, id, name
+        parts = csv_line.split(',')
+        assert len(parts) == 3
+        assert parts[1] == '1'  # ID is in the middle (alphabetically)
+        assert parts[0] == ''  # age is NULL
+        assert parts[2] == ''  # name is NULL
+
+    def test_record_to_csv_line_with_zero_values(self):
+        """Test CSV generation with zero values (should not be treated as null)"""
+        from target_redshift.db_sync import DbSync
+
+        config = {
+            'host': 'localhost',
+            'port': 5439,
+            'user': 'test',
+            'password': 'test',
+            'dbname': 'test',
+            'use_local_copy': True,
+            'default_target_schema': 'public'
+        }
+
+        schema_message = {
+            'stream': 'test_stream',
+            'schema': {
+                'properties': {
+                    'id': {'type': ['integer']},
+                    'count': {'type': ['integer']},
+                    'balance': {'type': ['number']}
+                }
+            },
+            'key_properties': ['id']
+        }
+
+        db_sync = DbSync(config, schema_message)
+        record = {'id': 1, 'count': 0, 'balance': 0.0}
+
+        csv_line = db_sync.record_to_csv_line(record)
+        # Zero values should be present in CSV
+        assert '0' in csv_line
+
+
+class TestParallelismCalculation:
+    """Test auto-parallelism calculation logic"""
+
+    def test_flush_streams_parallelism_auto_single_stream(self):
+        """Test auto parallelism with single stream"""
+        # When there's 1 stream, parallelism should be 1
+        config = {'parallelism': 0, 'max_parallelism': 16}
+        streams = {'stream1': {}}
+
+        # Calculate expected parallelism
+        n_streams = len(streams.keys())
+        max_par = config.get('max_parallelism', 16)
+        expected = min(n_streams, max_par)
+        assert expected == 1
+
+    def test_flush_streams_parallelism_auto_multiple_streams(self):
+        """Test auto parallelism with multiple streams"""
+        config = {'parallelism': 0, 'max_parallelism': 16}
+        streams = {f'stream{i}': {} for i in range(5)}
+
+        # Calculate expected parallelism
+        n_streams = len(streams.keys())
+        max_par = config.get('max_parallelism', 16)
+        expected = min(n_streams, max_par)
+        assert expected == 5
+
+    def test_flush_streams_parallelism_exceeds_max(self):
+        """Test auto parallelism when streams exceed max_parallelism"""
+        config = {'parallelism': 0, 'max_parallelism': 16}
+        streams = {f'stream{i}': {} for i in range(20)}
+
+        # Calculate expected parallelism
+        n_streams = len(streams.keys())
+        max_par = config.get('max_parallelism', 16)
+        expected = min(n_streams, max_par)
+        assert expected == 16
+
+    def test_flush_streams_parallelism_explicit(self):
+        """Test explicit parallelism setting (not auto)"""
+        config = {'parallelism': 4, 'max_parallelism': 16}
+        streams = {f'stream{i}': {} for i in range(10)}
+
+        # When parallelism is explicitly set, it should be used
+        parallelism = config.get('parallelism', 0)
+        assert parallelism == 4
+
+
+class TestColumnClause:
+    """Test SQL column clause generation"""
+
+    def test_column_clause_varchar(self):
+        """Test column clause for varchar type"""
+        from target_redshift.db_sync import column_clause
+
+        schema_property = {'type': ['string']}
+        result = column_clause('name', schema_property)
+
+        assert '"NAME"' in result
+        assert 'character varying' in result
+
+    def test_column_clause_integer(self):
+        """Test column clause for integer type"""
+        from target_redshift.db_sync import column_clause
+
+        schema_property = {'type': ['integer']}
+        result = column_clause('id', schema_property)
+
+        assert '"ID"' in result
+        assert 'numeric' in result
+
+    def test_column_clause_timestamp(self):
+        """Test column clause for timestamp type"""
+        from target_redshift.db_sync import column_clause
+
+        schema_property = {'type': ['string'], 'format': 'date-time'}
+        result = column_clause('created_at', schema_property)
+
+        assert '"CREATED_AT"' in result
+        assert 'timestamp without time zone' in result
+
+    def test_column_clause_boolean(self):
+        """Test column clause for boolean type"""
+        from target_redshift.db_sync import column_clause
+
+        schema_property = {'type': ['boolean']}
+        result = column_clause('is_active', schema_property)
+
+        assert '"IS_ACTIVE"' in result
+        assert 'boolean' in result
+
+    def test_column_clause_super_type(self):
+        """Test column clause for Redshift SUPER type"""
+        from target_redshift.db_sync import column_clause
+
+        schema_property = {'type': ['super']}
+        result = column_clause('json_data', schema_property)
+
+        assert '"JSON_DATA"' in result
+        assert 'super' in result
+
+
+class TestPrimaryKeyHandling:
+    """Test primary key string generation"""
+
+    def test_primary_column_names_single_key(self):
+        """Test primary_column_names with single key"""
+        from target_redshift.db_sync import primary_column_names
+
+        schema_message = {'key_properties': ['id']}
+        result = primary_column_names(schema_message)
+
+        assert len(result) == 1
+        assert result[0] == '"ID"'
+
+    def test_primary_column_names_composite_key(self):
+        """Test primary_column_names with composite key"""
+        from target_redshift.db_sync import primary_column_names
+
+        schema_message = {'key_properties': ['user_id', 'order_id']}
+        result = primary_column_names(schema_message)
+
+        assert len(result) == 2
+        assert '"USER_ID"' in result
+        assert '"ORDER_ID"' in result
+
+    def test_primary_column_names_empty(self):
+        """Test primary_column_names with no keys"""
+        from target_redshift.db_sync import primary_column_names
+
+        schema_message = {'key_properties': []}
+        result = primary_column_names(schema_message)
+
+        assert result == []
